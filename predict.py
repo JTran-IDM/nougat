@@ -4,6 +4,7 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
+import gc
 import sys
 from pathlib import Path
 import logging
@@ -124,7 +125,10 @@ def get_args():
 
 def main():
     args = get_args()
+    torch.set_float32_matmul_precision("high")
     model = NougatModel.from_pretrained(args.checkpoint)
+    model = torch.compile(model, mode="reduce-overhead")  # model fusion & reduce overhead
+
     model = move_to_device(model, bf16=not args.full_precision, cuda=args.batchsize > 0)
     if args.batchsize <= 0:
         # set batch size to 1. Need to check if there are benefits for CPU conversion for >1
@@ -164,6 +168,10 @@ def main():
     file_index = 0
     page_num = 0
     for i, (sample, is_last_page) in enumerate(tqdm(dataloader)):
+        # clear cache and garbage collect to avoid memory leaks
+        model.empty_cache()
+        gc.collect(generation=2)
+
         model_output = model.inference(
             image_tensors=sample, early_stopping=args.skipping
         )

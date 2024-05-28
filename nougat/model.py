@@ -667,6 +667,12 @@ class NougatModel(PreTrainedModel):
 
         return output
 
+    def empty_cache(self):
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+
     @classmethod
     def from_pretrained(
         cls,
