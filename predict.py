@@ -169,7 +169,7 @@ def main():
         num_workers=0,
     )
 
-    wandb_logger = WandbLogger(name="Inference Run", project="nougat-usecase-optim", anonymous='allow')
+    wandb_logger = WandbLogger(project="nougat-usecase-optim", entity='extralit')
     trainer = Trainer(
         logger=wandb_logger,
     )
