@@ -7,17 +7,17 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 import logging
 import math
 import os
-from typing import List, Optional, Union, Dict
 from collections import defaultdict
 from pathlib import Path
+from typing import List, Optional, Union, Dict
 
-import numpy as np
-from PIL import Image
 import cv2
+import numpy as np
 import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from PIL import Image
 from PIL import ImageOps
 from timm.models.swin_transformer import SwinTransformer
 from torch import Tensor
@@ -32,6 +32,7 @@ from transformers import (
 from transformers.file_utils import ModelOutput
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformers.modeling_utils import PretrainedConfig, PreTrainedModel
+
 from nougat.postprocessing import postprocess
 from nougat.transforms import train_transform, test_transform
 
@@ -433,7 +434,7 @@ class RunningVarTorch:
             self.values = torch.cat((self.values[:, 1:], x[:, None]), 1)
 
     def variance(self):
-        if self.values is None or self.values.shape[1] <= 0:
+        if self.values is None or self.values.numel() <= 0:
             return
         if self.norm:
             return torch.var(self.values, 1) / self.values.shape[1]

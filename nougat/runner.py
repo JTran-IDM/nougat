@@ -1,11 +1,8 @@
-import gc
-import os
-from typing import Optional, Any, Union, List, Dict, Tuple
+import time
+from typing import Optional, Any, List, Dict, Tuple
 
 import pytorch_lightning as pl
 import torch
-import wandb
-from PIL.Image import Image
 from torch import Tensor
 
 from nougat import NougatModel, NougatConfig
@@ -19,15 +16,20 @@ class NougatRunner(pl.LightningModule):
         else:
             self.model = NougatModel(config)
 
+        self.start_time = None
         self.save_hyperparameters(config)
 
     def forward(self, image_tensors: Tensor, decoder_input_ids: Optional[Tensor], attention_mask:Optional[Tensor]=None):
         return self.model.forward(image_tensors, decoder_input_ids, attention_mask)
 
     @torch.no_grad()
-    def predict_step(self, batch: Tuple[Tensor, bool], batch_idx: int) -> Tuple[Dict[str, Any], Any]:
+    def predict_step(self, batch: Tuple[Tensor, List[str]], batch_idx: int) -> Tuple[Dict[str, Any], Any]:
         sample, is_last_page = batch
         self.model.empty_cache()
+
+        # Start the timer when the first page of a new PDF is processed
+        if batch_idx == 0 or is_last_page:
+            self.start_time = time.time()
 
         model_output = self.model.inference(image_tensors=sample, early_stopping=True)
 
@@ -42,6 +44,12 @@ class NougatRunner(pl.LightningModule):
                     predictions.append(f"\n\n[MISSING_PAGE_EMPTY:{batch_idx}]\n\n")
             else:
                 predictions.append(output)
+
+        # Stop the timer and log the processing time when the last page of the current PDF is processed
+        if is_last_page:
+            end_time = time.time()
+            elapsed_time = end_time - self.start_time
+            self.logger.log_metrics({"pdf_runtime": elapsed_time})
 
         return model_output, is_last_page
 

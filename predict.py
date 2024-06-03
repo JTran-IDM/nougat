@@ -4,28 +4,25 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
 """
-import gc
-import sys
-from pathlib import Path
+import argparse
 import logging
 import re
-import argparse
-import re
-import os
+import sys
+import time
 from functools import partial
-import torch
-from torch.utils.data import ConcatDataset
-from tqdm import tqdm
-from nougat import NougatModel
-from nougat.runner import NougatRunner
-from nougat.utils.dataset import LazyDataset
-from nougat.utils.device import move_to_device, default_batch_size, tensor_sizes
-from nougat.utils.checkpoint import get_checkpoint
-from nougat.postprocessing import markdown_compatible
+from pathlib import Path
+
 import pypdf
-import wandb
+import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
+from torch.utils.data import ConcatDataset
+
+from nougat.postprocessing import markdown_compatible
+from nougat.runner import NougatRunner
+from nougat.utils.checkpoint import get_checkpoint
+from nougat.utils.dataset import LazyDataset
+from nougat.utils.device import default_batch_size
 
 logging.basicConfig(level=logging.INFO)
 
@@ -61,7 +58,7 @@ def get_args()->argparse.Namespace:
     parser.add_argument(
         "--precision",
         type=str,
-        default='bf16',
+        default='bf16-mixed',
         help="Use float32 instead of bfloat16. Can speed up CPU conversion for some setups.",
     )
     parser.add_argument(
@@ -129,7 +126,8 @@ def get_args()->argparse.Namespace:
 
 def main():
     args = get_args()
-    torch.set_float32_matmul_precision("high")
+    start_time = time.time()
+    torch.set_float32_matmul_precision("medium")
     model = NougatRunner(args)
     # model = torch.compile(model, mode="reduce-overhead")  # model fusion & reduce overhead
 
@@ -175,7 +173,6 @@ def main():
         precision=args.precision,
     )
     batch_outputs = trainer.predict(model, dataloader, return_predictions=True)
-    print('batch_outputs', tensor_sizes(batch_outputs))
 
     predictions = []
     file_index = 0
@@ -220,6 +217,10 @@ def main():
                 predictions = []
                 page_num = 0
                 file_index += 1
+
+    # end_time = time.time()
+    # pdf_processing_time = end_time - start_time
+    # wandb_logger.log_metrics({"runtime": pdf_processing_time})
 
 
 if __name__ == "__main__":
