@@ -17,16 +17,19 @@ import torch
 from torch.utils.data import ConcatDataset
 from tqdm import tqdm
 from nougat import NougatModel
+from nougat.module import NougatRunner
 from nougat.utils.dataset import LazyDataset
 from nougat.utils.device import move_to_device, default_batch_size
 from nougat.utils.checkpoint import get_checkpoint
 from nougat.postprocessing import markdown_compatible
 import pypdf
+import wandb
+from pytorch_lightning import Trainer
+from pytorch_lightning.loggers import WandbLogger
 
 logging.basicConfig(level=logging.INFO)
 
-
-def get_args():
+def get_args()->argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--batchsize",
@@ -126,13 +129,14 @@ def get_args():
 def main():
     args = get_args()
     torch.set_float32_matmul_precision("high")
-    model = NougatModel.from_pretrained(args.checkpoint)
-    model = torch.compile(model, mode="reduce-overhead")  # model fusion & reduce overhead
-
+    model = NougatRunner(args)
+    # model = torch.compile(model, mode="reduce-overhead")  # model fusion & reduce overhead
     model = move_to_device(model, bf16=not args.full_precision, cuda=args.batchsize > 0)
+
     if args.batchsize <= 0:
         # set batch size to 1. Need to check if there are benefits for CPU conversion for >1
         args.batchsize = 1
+
     model.eval()
     datasets = []
     for pdf in args.pdf:
@@ -148,7 +152,7 @@ def main():
         try:
             dataset = LazyDataset(
                 pdf,
-                partial(model.encoder.prepare_input, random_padding=False),
+                partial(model.model.encoder.prepare_input, random_padding=False),
                 args.pages,
             )
         except pypdf.errors.PdfStreamError:
@@ -162,19 +166,22 @@ def main():
         batch_size=args.batchsize,
         shuffle=False,
         collate_fn=LazyDataset.ignore_none_collate,
+        num_workers=11,
     )
+
+    wandb_logger = WandbLogger(name="Inference Run", project="nougat-usecase-optim", anonymous='allow')
+    trainer = Trainer(
+        devices="auto",
+        logger=wandb_logger,
+    )
+    batch_outputs = trainer.predict(model, dataloader)
+    all_predictions = [(pred, is_last_page) for batch in batch_outputs for pred, is_last_page in batch]
 
     predictions = []
     file_index = 0
     page_num = 0
-    for i, (sample, is_last_page) in enumerate(tqdm(dataloader)):
-        # clear cache and garbage collect to avoid memory leaks
-        model.empty_cache()
-        gc.collect(generation=2)
 
-        model_output = model.inference(
-            image_tensors=sample, early_stopping=args.skipping
-        )
+    for model_output, is_last_page in all_predictions:
         # check if model output is faulty
         for j, output in enumerate(model_output["predictions"]):
             if page_num == 0:
