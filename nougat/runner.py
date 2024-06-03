@@ -49,7 +49,7 @@ class NougatRunner(pl.LightningModule):
         if is_last_page:
             end_time = time.time()
             elapsed_time = end_time - self.start_time
-            self.logger.log_metrics({"pdf_runtime": elapsed_time})
+            self.logger.log_metrics({"pdf_runtime": elapsed_time}, step=self.global_step)
 
         return model_output, is_last_page
 
