@@ -18,3 +18,6 @@ def remove_pretty_linebreaks(string: str) -> str:
         str: Formatted string
     """
     return re.sub(r"(?<!\n)\n([^\n\d\*#\[])", r" \1", string).strip()
+
+
+

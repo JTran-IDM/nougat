@@ -24,7 +24,8 @@ class NougatRunner(pl.LightningModule):
     def forward(self, image_tensors: Tensor, decoder_input_ids: Optional[Tensor], attention_mask:Optional[Tensor]=None):
         return self.model.forward(image_tensors, decoder_input_ids, attention_mask)
 
-    def predict_step(self, batch: Tuple[Tensor, bool], batch_idx) -> Tuple[List[str], Any]:
+    @torch.no_grad()
+    def predict_step(self, batch: Tuple[Tensor, bool], batch_idx: int) -> Tuple[Dict[str, Any], Any]:
         sample, is_last_page = batch
         self.model.empty_cache()
 
@@ -42,22 +43,7 @@ class NougatRunner(pl.LightningModule):
             else:
                 predictions.append(output)
 
-        return predictions, is_last_page
-
-    def training_step(self, batch, batch_idx):
-        image_tensors, decoder_input_ids, attention_mask = batch
-        output = self(image_tensors, decoder_input_ids, attention_mask)
-        loss = output.loss  # assuming the output is a dictionary with a 'loss' key
-        self.log('train_loss', loss)
-        self.wandb_run.log({'train_loss': loss.item()})
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        image_tensors, decoder_input_ids, attention_mask = batch
-        output = self(image_tensors, decoder_input_ids, attention_mask)
-        loss = output.loss  # assuming the output is a dictionary with a 'loss' key
-        self.log('val_loss', loss)
-        self.wandb_run.log({'val_loss': loss.item()})
+        return model_output, is_last_page
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)

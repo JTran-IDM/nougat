@@ -7,7 +7,7 @@ Copyright (c) Meta Platforms, Inc. and affiliates.
 import logging
 import math
 import os
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 from collections import defaultdict
 from pathlib import Path
 
@@ -20,6 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from PIL import ImageOps
 from timm.models.swin_transformer import SwinTransformer
+from torch import Tensor
 from torchvision.transforms.functional import resize, rotate
 from transformers import (
     PreTrainedTokenizerFast,
@@ -29,6 +30,7 @@ from transformers import (
     MBartForCausalLM,
 )
 from transformers.file_utils import ModelOutput
+from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformers.modeling_utils import PretrainedConfig, PreTrainedModel
 from nougat.postprocessing import postprocess
 from nougat.transforms import train_transform, test_transform
@@ -417,7 +419,7 @@ class NougatConfig(PretrainedConfig):
 
 class RunningVarTorch:
     def __init__(self, L=15, norm=False):
-        self.values = None
+        self.values: Tensor = None
         self.L = L
         self.norm = norm
 
@@ -431,7 +433,7 @@ class RunningVarTorch:
             self.values = torch.cat((self.values[:, 1:], x[:, None]), 1)
 
     def variance(self):
-        if self.values is None:
+        if self.values is None or self.values.shape[1] <= 0:
             return
         if self.norm:
             return torch.var(self.values, 1) / self.values.shape[1]
@@ -523,7 +525,7 @@ class NougatModel(PreTrainedModel):
         image_tensors: torch.Tensor,
         decoder_input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-    ):
+    ) -> CausalLMOutputWithCrossAttentions:
         """
         Calculate a loss given an input image and a desired token sequence,
         the model will be trained in a teacher-forcing manner
@@ -532,8 +534,8 @@ class NougatModel(PreTrainedModel):
             image_tensors: (batch_size, num_channels, height, width)
             decoder_input_ids: (batch_size, sequence_length, embedding_dim)
         """
-        encoder_outputs = self.encoder(image_tensors)
-        decoder_outputs = self.decoder(
+        encoder_outputs = self.encoder.forward(image_tensors)
+        decoder_outputs = self.decoder.forward(
             input_ids=decoder_input_ids[:, :-1].contiguous(),
             encoder_hidden_states=encoder_outputs,
             attention_mask=attention_mask[:, :-1],
@@ -550,7 +552,7 @@ class NougatModel(PreTrainedModel):
         image_tensors: Optional[torch.Tensor] = None,
         return_attentions: bool = False,
         early_stopping: bool = True,
-    ):
+    ) -> Dict[str, Union[int, Tensor, None]]:
         """
         Generate a token sequence in an auto-regressive manner.
 

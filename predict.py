@@ -17,9 +17,9 @@ import torch
 from torch.utils.data import ConcatDataset
 from tqdm import tqdm
 from nougat import NougatModel
-from nougat.module import NougatRunner
+from nougat.runner import NougatRunner
 from nougat.utils.dataset import LazyDataset
-from nougat.utils.device import move_to_device, default_batch_size
+from nougat.utils.device import move_to_device, default_batch_size, tensor_sizes
 from nougat.utils.checkpoint import get_checkpoint
 from nougat.postprocessing import markdown_compatible
 import pypdf
@@ -59,8 +59,9 @@ def get_args()->argparse.Namespace:
         help="Recompute already computed PDF, discarding previous predictions.",
     )
     parser.add_argument(
-        "--full-precision",
-        action="store_true",
+        "--precision",
+        type=str,
+        default='bf16',
         help="Use float32 instead of bfloat16. Can speed up CPU conversion for some setups.",
     )
     parser.add_argument(
@@ -131,13 +132,11 @@ def main():
     torch.set_float32_matmul_precision("high")
     model = NougatRunner(args)
     # model = torch.compile(model, mode="reduce-overhead")  # model fusion & reduce overhead
-    model = move_to_device(model, bf16=not args.full_precision, cuda=args.batchsize > 0)
 
     if args.batchsize <= 0:
         # set batch size to 1. Need to check if there are benefits for CPU conversion for >1
         args.batchsize = 1
 
-    model.eval()
     datasets = []
     for pdf in args.pdf:
         if not pdf.exists():
@@ -169,18 +168,20 @@ def main():
         num_workers=0,
     )
 
-    wandb_logger = WandbLogger(project="nougat-usecase-optim", entity='extralit')
+    wandb_logger = WandbLogger(entity='extralit', project="nougat-usecase-optim")
     trainer = Trainer(
+        devices="auto",
         logger=wandb_logger,
+        precision=args.precision,
     )
-    batch_outputs = trainer.predict(model, dataloader)
-    all_predictions = [(pred, is_last_page) for batch in batch_outputs for pred, is_last_page in batch]
+    batch_outputs = trainer.predict(model, dataloader, return_predictions=True)
+    print('batch_outputs', tensor_sizes(batch_outputs))
 
     predictions = []
     file_index = 0
     page_num = 0
 
-    for model_output, is_last_page in all_predictions:
+    for model_output, is_last_page in batch_outputs:
         # check if model output is faulty
         for j, output in enumerate(model_output["predictions"]):
             if page_num == 0:
