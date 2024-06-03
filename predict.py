@@ -166,12 +166,11 @@ def main():
         batch_size=args.batchsize,
         shuffle=False,
         collate_fn=LazyDataset.ignore_none_collate,
-        num_workers=11,
+        num_workers=0,
     )
 
     wandb_logger = WandbLogger(name="Inference Run", project="nougat-usecase-optim", anonymous='allow')
     trainer = Trainer(
-        devices="auto",
         logger=wandb_logger,
     )
     batch_outputs = trainer.predict(model, dataloader)
