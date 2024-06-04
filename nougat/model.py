@@ -575,11 +575,6 @@ class NougatModel(PreTrainedModel):
         if image_tensors is None:
             image_tensors = self.encoder.prepare_input(image).unsqueeze(0)
 
-        if self.device.type != "mps":
-            image_tensors = image_tensors.to(next(self.parameters()).dtype)
-
-        image_tensors = image_tensors.to(self.device)
-
         last_hidden_state = self.encoder(image_tensors)
 
         encoder_outputs = ModelOutput(
@@ -610,8 +605,8 @@ class NougatModel(PreTrainedModel):
                 [StoppingCriteriaScores()] if early_stopping else []
             ),
         )
-        output["repetitions"] = decoder_output.sequences.clone()
-        output["sequences"] = decoder_output.sequences.clone()
+        output["repetitions"] = decoder_output.sequences.detach().clone()
+        output["sequences"] = decoder_output.sequences.detach().clone()
         batch_size = len(decoder_output.sequences)
 
         logits = torch.stack(decoder_output.scores, 1).cpu().max(-1)

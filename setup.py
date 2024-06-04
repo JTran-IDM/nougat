@@ -5,6 +5,7 @@ MIT License
 Copyright (c) Meta Platforms, Inc. and affiliates.
 """
 import os
+
 from setuptools import find_packages, setup
 
 ROOT = os.path.abspath(os.path.dirname(__file__))
@@ -56,7 +57,8 @@ setup(
         "albumentations>=1.0.0",
         "pypdf>=3.1.0",
         "pypdfium2",
-        "wandb"
+        "wandb",
+        "tensorboard",
     ],
     extras_require={
         "api": [

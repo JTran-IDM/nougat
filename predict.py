@@ -6,14 +6,16 @@ LICENSE file in the root directory of this source tree.
 """
 import argparse
 import logging
+import os.path
 import re
 import sys
-import time
 from functools import partial
 from pathlib import Path
 
 import pypdf
 import torch
+from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
+from lightning.pytorch.profilers import PyTorchProfiler
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import ConcatDataset
@@ -58,8 +60,8 @@ def get_args()->argparse.Namespace:
     parser.add_argument(
         "--precision",
         type=str,
-        default='bf16-mixed',
-        help="Use float32 instead of bfloat16. Can speed up CPU conversion for some setups.",
+        default='16',
+        help='One of ["transformer-engine", "transformer-engine-float16", "16-true", "16-mixed", "bf16-true", "bf16-mixed", "32-true", "64-true", "64", "32", "16", "bf16"]',
     )
     parser.add_argument(
         "--no-markdown",
@@ -84,8 +86,14 @@ def get_args()->argparse.Namespace:
         type=str,
         help="Provide page numbers like '1-4,7' for pages 1 through 4 and page 7. Only works for single PDF input.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Run tensorboard locally for pytorch profiler.",
+    )
     parser.add_argument("pdf", nargs="+", type=Path, help="PDF(s) to process.")
     args = parser.parse_args()
+
     if args.checkpoint is None or not args.checkpoint.exists():
         args.checkpoint = get_checkpoint(args.checkpoint, model_tag=args.model)
     if args.out is None:
@@ -126,10 +134,11 @@ def get_args()->argparse.Namespace:
 
 def main():
     args = get_args()
-    start_time = time.time()
-    torch.set_float32_matmul_precision("medium")
     model = NougatRunner(args)
-    # model = torch.compile(model, mode="reduce-overhead")  # model fusion & reduce overhead
+
+    if torch.cuda.is_available():
+        torch.set_float32_matmul_precision("medium")
+        model = torch.compile(model, mode="reduce-overhead")  # model fusion & reduce overhead
 
     if args.batchsize <= 0:
         # set batch size to 1. Need to check if there are benefits for CPU conversion for >1
@@ -166,10 +175,20 @@ def main():
         num_workers=0,
     )
 
-    wandb_logger = WandbLogger(entity='extralit', project="nougat-usecase-optim")
+    if args.debug:
+        logger = TensorBoardLogger(
+            save_dir=os.path.join(args.out, 'logs'),
+            default_hp_metric=False,
+            name=args.model,
+        )
+        profiler = PyTorchProfiler()
+    else:
+        logger = WandbLogger(entity='extralit', project="nougat-usecase-optim")
+        profiler = None
+
     trainer = Trainer(
         devices="auto",
-        logger=wandb_logger,
+        logger=logger, profiler=profiler,
         precision=args.precision,
     )
     batch_outputs = trainer.predict(model, dataloader, return_predictions=True)
@@ -178,7 +197,7 @@ def main():
     file_index = 0
     page_num = 0
 
-    for model_output, is_last_page in batch_outputs:
+    for i, (model_output, is_last_page) in enumerate(batch_outputs):
         # check if model output is faulty
         for j, output in enumerate(model_output["predictions"]):
             if page_num == 0:
@@ -205,6 +224,7 @@ def main():
                 if args.markdown:
                     output = markdown_compatible(output)
                 predictions.append(output)
+
             if is_last_page[j]:
                 out = "".join(predictions).strip()
                 out = re.sub(r"\n{3,}", "\n\n", out).strip()
@@ -217,10 +237,6 @@ def main():
                 predictions = []
                 page_num = 0
                 file_index += 1
-
-    # end_time = time.time()
-    # pdf_processing_time = end_time - start_time
-    # wandb_logger.log_metrics({"runtime": pdf_processing_time})
 
 
 if __name__ == "__main__":
