@@ -417,6 +417,22 @@ class NougatConfig(PretrainedConfig):
         self.num_heads = num_heads
         self.hidden_dimension = hidden_dimension
 
+    def to_hparams(self):
+        return {
+            "input_size": self.input_size,
+            "align_long_axis": self.align_long_axis,
+            "window_size": self.window_size,
+            "encoder_layer": self.encoder_layer,
+            "decoder_layer": self.decoder_layer,
+            "max_position_embeddings": self.max_position_embeddings,
+            "max_length": self.max_length,
+            "name_or_path": self.name_or_path,
+            "patch_size": self.patch_size,
+            "embed_dim": self.embed_dim,
+            "num_heads": self.num_heads,
+            "hidden_dimension": self.hidden_dimension,
+        }
+
 
 class RunningVarTorch:
     def __init__(self, L=15, norm=False):

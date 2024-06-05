@@ -1,5 +1,6 @@
 import time
-from typing import Optional, Any, List, Dict, Tuple
+from argparse import Namespace
+from typing import Optional, Any, List, Dict, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
@@ -9,15 +10,24 @@ from nougat import NougatModel, NougatConfig
 
 
 class NougatRunner(pl.LightningModule):
-    def __init__(self, config: NougatConfig):
+    def __init__(self, args: Union[NougatConfig, Namespace]):
         super().__init__()
-        if config.checkpoint:
-            self.model = NougatModel.from_pretrained(config.checkpoint)
+        if args.checkpoint:
+            self.model = NougatModel.from_pretrained(args.checkpoint)
+        elif isinstance(args, NougatConfig):
+            self.model = NougatModel(args)
+
+        # Combine args and model.config into a single dictionary
+        if isinstance(args, Namespace):
+            hparams = args.__dict__
+            hparams.update(self.model.config.to_hparams())
+        elif isinstance(args, NougatConfig):
+            hparams = args.to_hparams()
         else:
-            self.model = NougatModel(config)
+            raise ValueError("args must be an instance of Namespace or NougatConfig")
 
         self.pdf_start_time = time.time()
-        self.save_hyperparameters(config)
+        self.save_hyperparameters(hparams)
 
     def forward(self, image_tensors: Tensor, decoder_input_ids: Optional[Tensor], attention_mask:Optional[Tensor]=None):
         return self.model.forward(image_tensors, decoder_input_ids, attention_mask)
