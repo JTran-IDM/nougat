@@ -17,6 +17,7 @@ import torch
 from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
 from lightning.pytorch.profilers import PyTorchProfiler
 from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import DeviceStatsMonitor
 from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import ConcatDataset
 
@@ -88,8 +89,10 @@ def get_args()->argparse.Namespace:
     )
     parser.add_argument(
         "--debug",
-        action="store_true",
-        help="Run tensorboard locally for pytorch profiler.",
+        nargs='?',
+        const=True,
+        default=False,
+        help="Run tensorboard locally for pytorch profiler. Use 'advanced' for advanced profiling, or 'simple' for.",
     )
     parser.add_argument("pdf", nargs="+", type=Path, help="PDF(s) to process.")
     args = parser.parse_args()
@@ -175,13 +178,16 @@ def main():
         num_workers=0,
     )
 
+    callbacks = []
     if args.debug:
         logger = TensorBoardLogger(
             save_dir=os.path.join(args.out, 'logs'),
             default_hp_metric=False,
             name=args.model,
         )
-        profiler = PyTorchProfiler()
+        profiler = args.debug if isinstance(args.debug, str) else PyTorchProfiler(record_module_names=True)
+        callbacks.append(DeviceStatsMonitor())
+
     else:
         logger = WandbLogger(entity='extralit', project="nougat-usecase-optim")
         profiler = None
@@ -190,6 +196,7 @@ def main():
         devices="auto",
         logger=logger, profiler=profiler,
         precision=args.precision,
+        callbacks=callbacks,
     )
     batch_outputs = trainer.predict(model, dataloader, return_predictions=True)
 
