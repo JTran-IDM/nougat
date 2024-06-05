@@ -11,6 +11,7 @@ import re
 import sys
 from functools import partial
 from pathlib import Path
+from typing import Literal
 
 import pypdf
 import torch
@@ -58,12 +59,27 @@ def get_args()->argparse.Namespace:
         action="store_true",
         help="Recompute already computed PDF, discarding previous predictions.",
     )
+
     parser.add_argument(
         "--precision",
         type=str,
-        default='16',
+        default='bf16-mixed',
         help='One of ["transformer-engine", "transformer-engine-float16", "16-true", "16-mixed", "bf16-true", "bf16-mixed", "32-true", "64-true", "64", "32", "16", "bf16"]',
     )
+    parser.add_argument(
+        "--matmul-precision",
+        type=Literal['highest', 'high', 'medium'],
+        default="medium",
+        help="Precision for float32 matmul operations. One of ['low', 'medium', 'high'].",
+    )
+    parser.add_argument(
+        "--compile",
+        nargs='?',
+        const=True,
+        default=False,
+        help="Flag to torch.compile model. Use 'reduce-overhead' for model fusion and reduce overhead.",
+    )
+
     parser.add_argument(
         "--no-markdown",
         dest="markdown",
@@ -92,7 +108,8 @@ def get_args()->argparse.Namespace:
         nargs='?',
         const=True,
         default=False,
-        help="Run tensorboard locally for pytorch profiler. Use 'advanced' for advanced profiling, or 'simple' for.",
+        help="Run tensorboard locally for pytorch profiler. Use 'advanced' for advanced profiling, "
+             "or 'simple' for the simple pytorch profiler.",
     )
     parser.add_argument("pdf", nargs="+", type=Path, help="PDF(s) to process.")
     args = parser.parse_args()
@@ -139,14 +156,6 @@ def main():
     args = get_args()
     model = NougatRunner(args)
 
-    if torch.cuda.is_available():
-        torch.set_float32_matmul_precision("medium")
-        model = torch.compile(model, mode="reduce-overhead")  # model fusion & reduce overhead
-
-    if args.batchsize <= 0:
-        # set batch size to 1. Need to check if there are benefits for CPU conversion for >1
-        args.batchsize = 1
-
     datasets = []
     for pdf in args.pdf:
         if not pdf.exists():
@@ -170,13 +179,22 @@ def main():
         datasets.append(dataset)
     if len(datasets) == 0:
         return
+
     dataloader = torch.utils.data.DataLoader(
         ConcatDataset(datasets),
-        batch_size=args.batchsize,
+        batch_size=args.batchsize or 1,
         shuffle=False,
         collate_fn=LazyDataset.ignore_none_collate,
         num_workers=0,
     )
+
+    if torch.cuda.is_available():
+        if args.matmul_precision:
+            torch.set_float32_matmul_precision(args.matmul_precision)
+        if args.compile:
+            model = torch.compile(model, mode=args.compile if isinstance(args.compile, str) else None)
+    elif args.matmul_precision or args.compile:
+        logging.warning("Matmul precision or compile is only supported on CUDA devices.")
 
     callbacks = []
     if args.debug:
